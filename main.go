@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,7 +14,7 @@ import (
 	"github.com/drone/drone-plugin-go/plugin"
 )
 
-var netrcFile = `
+var netrcEntry = `
 machine %s
 login %s
 password %s
@@ -222,22 +223,26 @@ func trace(cmd *exec.Cmd) {
 
 // Writes the netrc file.
 func writeNetrc(in *plugin.Workspace) error {
-	if in.Netrc == nil || len(in.Netrc.Machine) == 0 {
+	if len(in.Netrc) == 0 {
 		return nil
 	}
-	out := fmt.Sprintf(
-		netrcFile,
-		in.Netrc.Machine,
-		in.Netrc.Login,
-		in.Netrc.Password,
-	)
+	var out bytes.Buffer
+	for _, e := range in.Netrc {
+		fmt.Fprintf(
+			&out,
+			netrcEntry,
+			e.Machine,
+			e.Login,
+			e.Password,
+		)
+	}
 	home := "/root"
 	u, err := user.Current()
 	if err == nil {
 		home = u.HomeDir
 	}
 	path := filepath.Join(home, ".netrc")
-	return ioutil.WriteFile(path, []byte(out), 0600)
+	return ioutil.WriteFile(path, out.Bytes(), 0600)
 }
 
 // Writes the RSA private key
