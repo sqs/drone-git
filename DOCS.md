@@ -9,6 +9,7 @@ the default configuration with the following parameters:
 * `tags` - fetches tags when set to `true`
 * `submodule_override` - override submodule urls
 * `submodule_update_remote` - pass the `--remote` flag to git submodule update (useful when tracking a branch instead of a commit in a submodule)
+* `tweak_gitattributes` - tweaks .gitttributes to ensure that no filters will be applied, there will be no `$Id$` substitution, and line endings will be forced to LF
 
 Sample configuration:
 

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/drone/drone-plugin-go/plugin"
@@ -22,12 +23,13 @@ password %s
 // Params stores the git clone parameters used to
 // configure and customzie the git clone behavior.
 type Params struct {
-	Depth           int               `json:"depth"`
-	Recursive       bool              `json:"recursive"`
-	SkipVerify      bool              `json:"skip_verify"`
-	Tags            bool              `json:"tags"`
-	Submodules      map[string]string `json:"submodule_override"`
-	SubmoduleRemote bool              `json:"submodule_update_remote"`
+	Depth              int               `json:"depth"`
+	Recursive          bool              `json:"recursive"`
+	SkipVerify         bool              `json:"skip_verify"`
+	Tags               bool              `json:"tags"`
+	Submodules         map[string]string `json:"submodule_override"`
+	SubmoduleRemote    bool              `json:"submodule_update_remote"`
+	TweakGitattributes bool              `json:"tweak_gitattributes"`
 }
 
 func main() {
@@ -101,15 +103,10 @@ func clone(r *plugin.Repo, b *plugin.Build, w *plugin.Workspace, v *Params) erro
 		cmds = append(cmds, updateSubmodules(v.SubmoduleRemote))
 	}
 
-	for _, cmd := range cmds {
-		cmd.Dir = w.Path
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		trace(cmd)
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
+	execute(cmds, w.Path)
+
+	if v.TweakGitattributes {
+		tweakGitattributes(w.Path)
 	}
 
 	return nil
@@ -281,4 +278,95 @@ func isPullRequest(b *plugin.Build) bool {
 func isTag(b *plugin.Build) bool {
 	return b.Event == plugin.EventTag ||
 		strings.HasPrefix(b.Ref, "refs/tags/")
+}
+
+// execute executes all the commands given using specified directory as CWD
+func execute(cmds []*exec.Cmd, cwd string) error {
+	for _, cmd := range cmds {
+		cmd.Dir = cwd
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		trace(cmd)
+		err := cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Describes .gitattribute tweaking rules in form
+// RE pattern => replacement string (literal)
+type tweak struct {
+	pattern     *regexp.Regexp
+	replacement string
+}
+
+// .gitattribute tweaking rules
+var tweaks = make([]tweak, 0, 3)
+
+// initializes .gitattribute tweaking rules
+// current rules are:
+// - transform "eol=crlf" to "eol=lf" (ensure that LF line endings are used regardless of OS and repository configuration)
+// - remove "ident" attributes to prevent $Id$ substitution
+// - remove filter=NAME to disable filters invocation
+func init() {
+	p, err := regexp.Compile(`\beol=crlf\b`)
+	if err != nil {
+		panic(err)
+	}
+	tweaks = append(tweaks, tweak{p, "eol=lf"})
+	p, err = regexp.Compile(`([^=]|^)ident\b`)
+	if err != nil {
+		panic(err)
+	}
+	tweaks = append(tweaks, tweak{p, ""})
+	p, err = regexp.Compile(`\bfilter=(\S+)`)
+	if err != nil {
+		panic(err)
+	}
+	tweaks = append(tweaks, tweak{p, ""})
+}
+
+// tweakGitattributes tweaks .gitattributes in the given directory
+func tweakGitattributes(directory string) error {
+	attrsFile := filepath.Join(directory, ".gitattributes")
+	attrs, err := ioutil.ReadFile(attrsFile)
+	// don't care if we were unable to read .gitattributes
+	if err != nil {
+		return nil
+	}
+
+	tweaked := false
+	for _, t := range tweaks {
+		if !t.pattern.Match(attrs) {
+			continue
+		}
+		attrs = t.pattern.ReplaceAllLiteral(attrs, []byte(t.replacement))
+		tweaked = true
+	}
+
+	if !tweaked {
+		return nil
+	}
+	err = ioutil.WriteFile(attrsFile, attrs, 0600)
+	if err != nil {
+		return err
+	}
+
+	cmds := []*exec.Cmd{
+		// add updated .gitattributes
+		exec.Command("git", "add", ".gitattributes"),
+		// commit updated .gitattributes
+		exec.Command("git", "commit", "-m", "tweaking .gitattributes"),
+		// remove cloned tree's files
+		exec.Command("git", "rm", "--cached", "-r", "."),
+		// reset cloned repository in order to take into account tweaked .gitattributes
+		exec.Command("git", "reset", "--hard"),
+		// remove commit of .gitattributes
+		exec.Command("git", "reset", "HEAD~"),
+		// restore original .gitattributes locally
+		exec.Command("git", "checkout", ".gitattributes"),
+	}
+	return execute(cmds, directory)
 }
