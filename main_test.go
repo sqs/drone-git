@@ -379,7 +379,7 @@ func TestUpdateSubmodulesRemote(t *testing.T) {
 // helper function that will setup a temporary workspace.
 // to which we can clone the repositroy
 func setup() string {
-	dir, _ := ioutil.TempDir("/tmp", "drone_git_test_")
+	dir, _ := ioutil.TempDir("", "drone_git_test_")
 	os.Mkdir(dir, 0777)
 	return dir
 }
