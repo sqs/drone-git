@@ -308,7 +308,7 @@ type tweak struct {
 }
 
 // .gitattribute tweaking rules
-var tweaks = make([]tweak, 0, 3)
+var tweaks [3]tweak
 
 // initializes .gitattribute tweaking rules
 // current rules are:
@@ -320,17 +320,17 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	tweaks = append(tweaks, tweak{p, "eol=lf"})
+	tweaks[0] = tweak{p, "eol=lf"}
 	p, err = regexp.Compile(`([^=]|^)ident\b`)
 	if err != nil {
 		panic(err)
 	}
-	tweaks = append(tweaks, tweak{p, ""})
+	tweaks[1] = tweak{p, ""}
 	p, err = regexp.Compile(`\bfilter=(\S+)`)
 	if err != nil {
 		panic(err)
 	}
-	tweaks = append(tweaks, tweak{p, ""})
+	tweaks[2] = tweak{p, ""}
 }
 
 // tweakGitattributes tweaks .gitattributes in the given directory

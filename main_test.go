@@ -195,9 +195,22 @@ func TestClone(t *testing.T) {
 			t.Errorf("Expected successful clone. Got error. %s.", err)
 		}
 
-		data := readFile(dir, c.file)
-		if data != c.data {
-			t.Errorf("Expected %s to contain [%s]. Got [%s].", c.file, c.data, data)
+		fileData := readFile(dir, c.file)
+		if fileData != c.data {
+			t.Errorf("Expected %s to contain [%s]. Got [%s].", c.file, c.data, fileData)
+		}
+
+		if c.tweak {
+			cmd := exec.Command("git", "show", c.commit+":"+c.file)
+			cmd.Dir = dir
+			data, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Error(err)
+			}
+			gitData := string(data)
+			if gitData != fileData {
+				t.Errorf("Expected file %s to contain raw data [%s]. Got [%s].", c.file, gitData, fileData)
+			}
 		}
 
 		if c.tags != nil {
