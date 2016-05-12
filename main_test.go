@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,16 +16,18 @@ import (
 // commits is a list of commits of different types (push, pull request, tag)
 // to help us verify that this clone plugin can handle multiple commit types.
 var commits = []struct {
-	path       string
-	clone      string
-	event      string
-	branch     string
-	commit     string
-	ref        string
-	file       string
-	data       string
-	tags       []string
-	submodules map[string]string
+	path             string
+	clone            string
+	event            string
+	branch           string
+	commit           string
+	ref              string
+	file             string
+	data             string
+	tags             []string
+	submodules       map[string]string
+	tweak            bool
+	skipNotEmptyTest bool
 }{
 	// first commit
 	{
@@ -118,6 +121,49 @@ var commits = []struct {
 			"Hello-World": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
 		},
 	},
+	// tweak attributes (eol=crlf)
+	{
+		path:       "sgtest/gitattributes",
+		clone:      "https://github.com/sgtest/gitattributes.git",
+		event:      plugin.EventPush,
+		branch:     "master",
+		commit:     "4d003e20c18ce15a69eeac67b3fdb94932d35271",
+		ref:        "refs/heads/master",
+		file:       "crlf.go",
+		data:       "package main\n\nfunc bar() {\n\tbar()\n}",
+		tags:       nil,
+		submodules: nil,
+		tweak:      true,
+	},
+	// tweak attributes (ident)
+	{
+		path:       "sgtest/gitattributes",
+		clone:      "https://github.com/sgtest/gitattributes.git",
+		event:      plugin.EventPush,
+		branch:     "master",
+		commit:     "4d003e20c18ce15a69eeac67b3fdb94932d35271",
+		ref:        "refs/heads/master",
+		file:       "ident.go",
+		data:       "package main\n\nvar qux = \"$Id$\"",
+		tags:       nil,
+		submodules: nil,
+		tweak:      true,
+	},
+	// tweak attributes (disabled)
+	{
+		path:       "sgtest/gitattributes",
+		clone:      "https://github.com/sgtest/gitattributes.git",
+		event:      plugin.EventPush,
+		branch:     "master",
+		commit:     "4d003e20c18ce15a69eeac67b3fdb94932d35271",
+		ref:        "refs/heads/master",
+		file:       "ident.go",
+		data:       "package main\r\n\r\nvar qux = \"$Id: b1a36a842cd537057c6214ba858fe16654cc0935 $\"",
+		tags:       nil,
+		submodules: nil,
+		// you can't change "TweakGitattributes" while checking in into the same directory
+		skipNotEmptyTest: true,
+	},
 }
 
 // TestClone tests the ability to clone a specific commit into
@@ -141,16 +187,30 @@ func TestClone(t *testing.T) {
 		b := &plugin.Build{Commit: c.commit, Branch: c.branch, Ref: c.ref, Event: c.event}
 		w := &plugin.Workspace{Path: dir}
 		v := &Params{
-			Recursive: recursive,
-			Tags:      tags,
+			Recursive:          recursive,
+			Tags:               tags,
+			TweakGitattributes: c.tweak,
 		}
 		if err := clone(r, b, w, v); err != nil {
 			t.Errorf("Expected successful clone. Got error. %s.", err)
 		}
 
-		data := readFile(dir, c.file)
-		if data != c.data {
-			t.Errorf("Expected %s to contain [%s]. Got [%s].", c.file, c.data, data)
+		fileData := readFile(dir, c.file)
+		if fileData != c.data {
+			t.Errorf("Expected %s to contain [%s]. Got [%s].", c.file, c.data, fileData)
+		}
+
+		if c.tweak {
+			cmd := exec.Command("git", "show", c.commit+":"+c.file)
+			cmd.Dir = dir
+			data, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Error(err)
+			}
+			gitData := string(data)
+			if gitData != fileData {
+				t.Errorf("Expected file %s to contain raw data [%s]. Got [%s].", c.file, gitData, fileData)
+			}
 		}
 
 		if c.tags != nil {
@@ -190,6 +250,10 @@ func TestCloneNonEmpty(t *testing.T) {
 
 	for _, c := range commits {
 
+		if c.skipNotEmptyTest {
+			continue
+		}
+
 		recursive := false
 		if c.submodules != nil {
 			recursive = true
@@ -204,8 +268,9 @@ func TestCloneNonEmpty(t *testing.T) {
 		b := &plugin.Build{Commit: c.commit, Branch: c.branch, Ref: c.ref, Event: c.event}
 		w := &plugin.Workspace{Path: filepath.Join(dir, c.path)}
 		v := &Params{
-			Recursive: recursive,
-			Tags:      tags,
+			Recursive:          recursive,
+			Tags:               tags,
+			TweakGitattributes: c.tweak,
 		}
 		if err := clone(r, b, w, v); err != nil {
 			t.Errorf("Expected successful clone. Got error. %s.", err)
@@ -379,13 +444,16 @@ func TestUpdateSubmodulesRemote(t *testing.T) {
 // helper function that will setup a temporary workspace.
 // to which we can clone the repositroy
 func setup() string {
-	dir, _ := ioutil.TempDir("/tmp", "drone_git_test_")
+	dir, _ := ioutil.TempDir("", "drone_git_test_")
 	os.Mkdir(dir, 0777)
 	return dir
 }
 
 // helper function to delete the temporary workspace.
 func teardown(dir string) {
+	if runtime.GOOS == "windows" {
+		clearReadOnly(dir)
+	}
 	os.RemoveAll(dir)
 }
 
@@ -445,4 +513,35 @@ func getSubmodules(dir string) (map[string]string, error) {
 		return nil, err
 	}
 	return submodules, nil
+}
+
+// Tries to remove READONLY mark from file (recursive)
+// On Windows, os.Remove does not work if file was marked as READONLY (for example, git does it)
+func clearReadOnly(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if !fi.IsDir() {
+		return os.Chmod(path, 0666)
+	}
+
+	fd, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer fd.Close()
+
+	names, _ := fd.Readdirnames(-1)
+	for _, name := range names {
+		err = clearReadOnly(filepath.Join(path, name))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
