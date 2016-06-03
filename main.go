@@ -106,7 +106,10 @@ func clone(r *plugin.Repo, b *plugin.Build, w *plugin.Workspace, v *Params) erro
 		cmds = append(cmds, updateSubmodules(v.SubmoduleRemote))
 	}
 
-	execute(cmds, w.Path)
+	if err := execute(cmds, w.Path); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return err
+	}
 
 	if v.TweakGitattributes {
 		tweakGitattributes(w.Path)
