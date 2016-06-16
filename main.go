@@ -84,17 +84,18 @@ func clone(r *plugin.Repo, b *plugin.Build, w *plugin.Workspace, v *Params) erro
 	}
 
 	// check for a .git directory and whether it's empty
-	if isDirEmpty(filepath.Join(w.Path, ".git")) {
+	emptyDir := isDirEmpty(filepath.Join(w.Path, ".git"))
+	if emptyDir {
 		cmds = append(cmds, initGit())
 		cmds = append(cmds, remote(r))
 	}
 
 	switch {
 	case isPullRequest(b) || isTag(b):
-		cmds = append(cmds, fetch(b, v.Tags, v.Depth))
+		cmds = append(cmds, fetch(b, v.Tags, v.Depth, emptyDir))
 		cmds = append(cmds, checkoutHead(b))
 	default:
-		cmds = append(cmds, fetch(b, v.Tags, v.Depth))
+		cmds = append(cmds, fetch(b, v.Tags, v.Depth, emptyDir))
 		cmds = append(cmds, checkoutSha(b))
 	}
 
@@ -160,7 +161,7 @@ func checkoutSha(b *plugin.Build) *exec.Cmd {
 
 // fetch retuns git command that fetches from origin. If tags is true
 // then tags will be fetched.
-func fetch(b *plugin.Build, tags bool, depth int) *exec.Cmd {
+func fetch(b *plugin.Build, tags bool, depth int, emptyDir bool) *exec.Cmd {
 	tags_option := "--no-tags"
 	if tags {
 		tags_option = "--tags"
@@ -174,7 +175,17 @@ func fetch(b *plugin.Build, tags bool, depth int) *exec.Cmd {
 		cmd.Args = append(cmd.Args, fmt.Sprintf("--depth=%d", depth))
 	}
 	cmd.Args = append(cmd.Args, "origin")
-	cmd.Args = append(cmd.Args, fmt.Sprintf("+%s:", b.Ref))
+	// when ref is omitted, there may be error with not-default repo names
+	// for example
+	//
+	//	git init
+	//	git remote add origin https://github.com/apache/log4j
+	//	git fetch --no-tags origin +:
+	//	git reset --hard -q c5f4279081091e562c44bb753f6e52dc6be5fa52
+	//
+	if !emptyDir || b.Ref != "" {
+		cmd.Args = append(cmd.Args, fmt.Sprintf("+%s:", b.Ref))
+	}
 
 	return cmd
 }
