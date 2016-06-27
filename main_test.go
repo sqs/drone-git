@@ -164,6 +164,19 @@ var commits = []struct {
 		// you can't change "TweakGitattributes" while checking in into the same directory
 		skipNotEmptyTest: true,
 	},
+	// empty ref
+	{
+		path:       "apache/log4j",
+		clone:      "https://github.com/apache/log4j.git",
+		event:      plugin.EventPush,
+		branch:     "BRANCH_1_3_ABANDONED",
+		commit:     "c5f4279081091e562c44bb753f6e52dc6be5fa52",
+		ref:        "",
+		file:       "NOTICE",
+		data:       "This product includes software developed by\nThe Apache Software Foundation (http://www.apache.org/).\n",
+		tags:       nil,
+		submodules: nil,
+	},
 }
 
 // TestClone tests the ability to clone a specific commit into
@@ -357,7 +370,7 @@ func TestFetch(t *testing.T) {
 		},
 	}
 	for _, td := range testdata {
-		c := fetch(td.build, td.tags, td.depth)
+		c := fetch(td.build, td.tags, td.depth, false)
 		if len(c.Args) != len(td.exp) {
 			t.Errorf("Expected: %s, got %s", td.exp, c.Args)
 		}
