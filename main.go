@@ -160,7 +160,10 @@ func checkoutSha(b *plugin.Build) *exec.Cmd {
 }
 
 // fetch retuns git command that fetches from origin. If tags is true
-// then tags will be fetched.
+// then tags will be fetched. Last parameter "emptyDir" indicates if target
+// directory was empty, in this case we should omit empty ref (+:) when
+// constructing command line, otherwise there may be errors with non-standard
+// default branches
 func fetch(b *plugin.Build, tags bool, depth int, emptyDir bool) *exec.Cmd {
 	tags_option := "--no-tags"
 	if tags {
@@ -175,8 +178,8 @@ func fetch(b *plugin.Build, tags bool, depth int, emptyDir bool) *exec.Cmd {
 		cmd.Args = append(cmd.Args, fmt.Sprintf("--depth=%d", depth))
 	}
 	cmd.Args = append(cmd.Args, "origin")
-	// when ref is omitted, there may be error with not-default repo names
-	// for example
+	// when ref is omitted, there may be error with non-standard
+	// default branches, for example
 	//
 	//	git init
 	//	git remote add origin https://github.com/apache/log4j
